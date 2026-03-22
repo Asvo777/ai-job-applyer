@@ -17,46 +17,28 @@ from pypdf import PdfReader
 DB_PATH = Path(__file__).resolve().parent / "assistant.db"
 
 STOPWORDS = {
-    "the",
-    "and",
-    "for",
-    "that",
-    "with",
-    "you",
-    "your",
-    "are",
-    "our",
-    "will",
-    "from",
-    "this",
-    "have",
-    "job",
-    "role",
-    "team",
-    "work",
-    "experience",
-    "skills",
-    "they",
-    "their",
-    "not",
-    "all",
+    "the", "and", "for", "that", "with", "you", "your", "are", "our",
+    "will", "from", "this", "have", "job", "role", "team", "work",
+    "experience", "skills", "they", "their", "not", "all",
 }
 
 PROFILE_SYNONYMS = {
-    "full_name": ["name", "full name", "legal name", "candidate name"],
-    "email": ["email", "e-mail", "email address"],
-    "phone": ["phone", "mobile", "telephone", "contact number"],
-    "location": ["location", "city", "address", "country"],
-    "linkedin": ["linkedin", "linkedin profile"],
-    "github": ["github", "portfolio", "website", "personal website"],
-    "years_experience": ["years of experience", "experience years", "yoe"],
-    "current_title": ["current title", "job title", "current role"],
-    "current_company": ["current company", "employer", "company"],
-    "notice_period": ["notice period", "availability", "start date"],
+    "full_name":          ["name", "full name", "legal name", "candidate name"],
+    "email":              ["email", "e-mail", "email address"],
+    "phone":              ["phone", "mobile", "telephone", "contact number"],
+    "location":           ["location", "city", "address", "country"],
+    "linkedin":           ["linkedin", "linkedin profile"],
+    "github":             ["github", "portfolio", "website", "personal website"],
+    "years_experience":   ["years of experience", "experience years", "yoe"],
+    "current_title":      ["current title", "job title", "current role"],
+    "current_company":    ["current company", "employer", "company"],
+    "notice_period":      ["notice period", "availability", "start date"],
     "work_authorization": ["work authorization", "visa status", "authorized"],
     "salary_expectation": ["salary expectation", "salary", "compensation"],
 }
 
+
+# ── Pydantic models ────────────────────────────────────────────────────────────
 
 class ProfilePayload(BaseModel):
     data: dict[str, str] = Field(default_factory=dict)
@@ -96,6 +78,8 @@ class FieldSuggestion:
     value: str | None
 
 
+# ── Helpers ────────────────────────────────────────────────────────────────────
+
 def utc_now() -> str:
     return datetime.now(tz=timezone.utc).isoformat()
 
@@ -109,19 +93,18 @@ def normalize(text: str | None) -> str:
     return lowered
 
 
+# ── DB ─────────────────────────────────────────────────────────────────────────
+
 def init_db() -> None:
     with sqlite3.connect(DB_PATH) as conn:
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS profile (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
-            """
-        )
-        conn.execute(
-            """
+        """)
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS jobs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 title TEXT,
@@ -130,17 +113,14 @@ def init_db() -> None:
                 description TEXT NOT NULL,
                 created_at TEXT NOT NULL
             )
-            """
-        )
-        conn.execute(
-            """
+        """)
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS field_memory (
                 normalized_label TEXT PRIMARY KEY,
                 value TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
-            """
-        )
+        """)
         conn.commit()
 
 
@@ -149,79 +129,50 @@ def upsert_profile(data: dict[str, str]) -> None:
         return
     with sqlite3.connect(DB_PATH) as conn:
         for key, value in data.items():
-            conn.execute(
-                """
-                INSERT INTO profile (key, value, updated_at)
-                VALUES (?, ?, ?)
-                ON CONFLICT(key)
-                DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
-                """,
-                (key, value, utc_now()),
-            )
+            conn.execute("""
+                INSERT INTO profile (key, value, updated_at) VALUES (?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+            """, (key, value, utc_now()))
         conn.commit()
 
 
 def get_profile() -> dict[str, str]:
     with sqlite3.connect(DB_PATH) as conn:
         rows = conn.execute("SELECT key, value FROM profile").fetchall()
-    return {key: value for key, value in rows}
+    return {k: v for k, v in rows}
 
 
 def store_job(payload: JobScanPayload) -> int:
     with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.execute(
-            """
+        cursor = conn.execute("""
             INSERT INTO jobs (title, company, url, description, created_at)
             VALUES (?, ?, ?, ?, ?)
-            """,
-            (
-                payload.title,
-                payload.company,
-                payload.url,
-                payload.page_text,
-                utc_now(),
-            ),
-        )
+        """, (payload.title, payload.company, payload.url, payload.page_text, utc_now()))
         conn.commit()
         return int(cursor.lastrowid)
 
 
 def get_latest_job() -> dict[str, Any] | None:
     with sqlite3.connect(DB_PATH) as conn:
-        row = conn.execute(
-            """
+        row = conn.execute("""
             SELECT id, title, company, url, description, created_at
-            FROM jobs
-            ORDER BY id DESC
-            LIMIT 1
-            """
-        ).fetchone()
+            FROM jobs ORDER BY id DESC LIMIT 1
+        """).fetchone()
     if not row:
         return None
-    return {
-        "id": row[0],
-        "title": row[1],
-        "company": row[2],
-        "url": row[3],
-        "description": row[4],
-        "created_at": row[5],
-    }
+    return {"id": row[0], "title": row[1], "company": row[2],
+            "url": row[3], "description": row[4], "created_at": row[5]}
 
 
 def remember_field(label: str, value: str) -> None:
-    normalized_label = normalize(label)
-    if not normalized_label:
+    nlabel = normalize(label)
+    if not nlabel:
         return
     with sqlite3.connect(DB_PATH) as conn:
-        conn.execute(
-            """
-            INSERT INTO field_memory (normalized_label, value, updated_at)
-            VALUES (?, ?, ?)
-            ON CONFLICT(normalized_label)
-            DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
-            """,
-            (normalized_label, value, utc_now()),
-        )
+        conn.execute("""
+            INSERT INTO field_memory (normalized_label, value, updated_at) VALUES (?, ?, ?)
+            ON CONFLICT(normalized_label) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+        """, (nlabel, value, utc_now()))
         conn.commit()
 
 
@@ -234,24 +185,23 @@ def get_field_memory() -> dict[str, str]:
 def extract_resume_text(raw_bytes: bytes, content_type: str | None) -> str:
     if content_type and "pdf" in content_type.lower():
         reader = PdfReader(io.BytesIO(raw_bytes))
-        pages = [page.extract_text() or "" for page in reader.pages]
-        return "\n".join(pages).strip()
+        return "\n".join(page.extract_text() or "" for page in reader.pages).strip()
     decoded = raw_bytes.decode("utf-8", errors="ignore").strip()
     if not decoded:
-        raise HTTPException(status_code=400, detail="Uploaded resume could not be decoded")
+        raise HTTPException(status_code=400, detail="Resume could not be decoded")
     return decoded
 
 
 def top_keywords(text: str, limit: int = 15) -> list[str]:
     words = re.findall(r"[A-Za-z]{3,}", text.lower())
-    filtered = [word for word in words if word not in STOPWORDS]
-    counts = Counter(filtered)
-    return [word for word, _ in counts.most_common(limit)]
+    filtered = [w for w in words if w not in STOPWORDS]
+    return [w for w, _ in Counter(filtered).most_common(limit)]
 
 
-def match_profile_value(field: FormField, profile: dict[str, str], memory: dict[str, str]) -> FieldSuggestion:
-    candidates = [field.label, field.placeholder, field.name, field.id]
-    joined = normalize(" ".join([part for part in candidates if part]))
+def match_profile_value(
+    field: FormField, profile: dict[str, str], memory: dict[str, str]
+) -> FieldSuggestion:
+    joined = normalize(" ".join(filter(None, [field.label, field.placeholder, field.name, field.id])))
 
     if joined in memory:
         return FieldSuggestion(key=joined, value=memory[joined])
@@ -259,8 +209,7 @@ def match_profile_value(field: FormField, profile: dict[str, str], memory: dict[
     for known_key, aliases in PROFILE_SYNONYMS.items():
         if known_key not in profile:
             continue
-        alias_hit = any(alias in joined for alias in aliases)
-        if alias_hit:
+        if any(alias in joined for alias in aliases):
             return FieldSuggestion(key=known_key, value=profile[known_key])
 
     for known_key, known_value in profile.items():
@@ -271,34 +220,36 @@ def match_profile_value(field: FormField, profile: dict[str, str], memory: dict[
 
 
 def generate_cover_letter_text(profile: dict[str, str], job: dict[str, Any], tone: str) -> str:
-    full_name = profile.get("full_name", "Candidate")
+    full_name     = profile.get("full_name", "Candidate")
     current_title = profile.get("current_title", "professional")
-    company = job.get("company") or "your company"
-    job_title = job.get("title") or "this role"
+    company       = job.get("company") or "your company"
+    job_title     = job.get("title")   or "this role"
     resume_snippet = profile.get("resume_text", "")
 
-    highlights = ", ".join(top_keywords(resume_snippet, limit=8))
-    jd_keywords = ", ".join(top_keywords(job.get("description", ""), limit=10))
+    highlights   = ", ".join(top_keywords(resume_snippet, limit=8))
+    jd_keywords  = ", ".join(top_keywords(job.get("description", ""), limit=10))
 
-    tone_line = {
-        "enthusiastic": "I am genuinely excited",
-        "concise": "I am writing",
-    }.get(tone, "I am pleased")
+    tone_line = {"enthusiastic": "I am genuinely excited",
+                 "concise": "I am writing"}.get(tone, "I am pleased")
 
     return (
-        f"Dear Hiring Team,\\n\\n"
+        f"Dear Hiring Team,\n\n"
         f"{tone_line} to apply for the {job_title} position at {company}. "
-        f"I am a {current_title} with hands-on experience in {highlights or 'relevant technical and business work'}.\\n\\n"
-        f"After reviewing your job description, I noticed strong alignment with my background, especially around "
-        f"{jd_keywords or 'cross-functional execution and impact-oriented delivery'}. "
-        f"I focus on building practical solutions, collaborating closely with stakeholders, and shipping measurable outcomes.\\n\\n"
+        f"I am a {current_title} with hands-on experience in "
+        f"{highlights or 'relevant technical and business work'}.\n\n"
+        f"After reviewing your job description, I noticed strong alignment with my background, "
+        f"especially around {jd_keywords or 'cross-functional execution and impact-oriented delivery'}. "
+        f"I focus on building practical solutions, collaborating closely with stakeholders, "
+        f"and shipping measurable outcomes.\n\n"
         f"I would value the opportunity to bring this mindset to {company}. "
-        f"Thank you for your time and consideration.\\n\\n"
-        f"Sincerely,\\n{full_name}"
+        f"Thank you for your time and consideration.\n\n"
+        f"Sincerely,\n{full_name}"
     )
 
 
-app = FastAPI(title="Job Application Assistant API", version="0.1.0")
+# ── FastAPI app ────────────────────────────────────────────────────────────────
+
+app = FastAPI(title="Job Application Assistant API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -328,9 +279,8 @@ def save_profile(payload: ProfilePayload) -> dict[str, Any]:
 @app.get("/profile")
 def read_profile() -> dict[str, Any]:
     profile = get_profile()
-    visible_profile = {k: v for k, v in profile.items() if k != "resume_text"}
     return {
-        "profile": visible_profile,
+        "profile": {k: v for k, v in profile.items() if k != "resume_text"},
         "has_resume": bool(profile.get("resume_text", "").strip()),
     }
 
@@ -340,10 +290,7 @@ def upload_resume(file: UploadFile = File(...)) -> dict[str, Any]:
     raw = file.file.read()
     text = extract_resume_text(raw, file.content_type)
     upsert_profile({"resume_text": text})
-    return {
-        "status": "resume_saved",
-        "char_count": len(text),
-    }
+    return {"status": "resume_saved", "char_count": len(text)}
 
 
 @app.post("/job/scan")
@@ -351,11 +298,7 @@ def scan_job(payload: JobScanPayload) -> dict[str, Any]:
     if len(payload.page_text.strip()) < 100:
         raise HTTPException(status_code=400, detail="Page text is too short to scan")
     job_id = store_job(payload)
-    keywords = top_keywords(payload.page_text)
-    return {
-        "job_id": job_id,
-        "keywords": keywords,
-    }
+    return {"job_id": job_id, "keywords": top_keywords(payload.page_text)}
 
 
 @app.get("/job/latest")
@@ -371,20 +314,16 @@ def generate_cover_letter(payload: CoverLetterPayload) -> dict[str, Any]:
     profile = get_profile()
     if not profile.get("resume_text"):
         raise HTTPException(status_code=400, detail="Upload your resume first")
-
     job = get_latest_job()
     if not job:
         raise HTTPException(status_code=400, detail="Scan a job description first")
-
-    text = generate_cover_letter_text(profile=profile, job=job, tone=payload.tone)
-    return {"cover_letter": text}
+    return {"cover_letter": generate_cover_letter_text(profile=profile, job=job, tone=payload.tone)}
 
 
 @app.post("/form/suggest")
 def suggest_for_form(payload: FormSuggestPayload) -> dict[str, Any]:
     profile = get_profile()
-    memory = get_field_memory()
-
+    memory  = get_field_memory()
     suggestions: dict[str, str] = {}
     unknown_fields: list[dict[str, str]] = []
 
@@ -393,19 +332,13 @@ def suggest_for_form(payload: FormSuggestPayload) -> dict[str, Any]:
         suggestion = match_profile_value(field=field, profile=profile, memory=memory)
         if suggestion.value:
             suggestions[key] = suggestion.value
-            continue
-
-        unknown_fields.append(
-            {
+        else:
+            unknown_fields.append({
                 "key": key,
                 "label": field.label or field.placeholder or field.name or field.id or "Unknown field",
-            }
-        )
+            })
 
-    return {
-        "suggestions": suggestions,
-        "unknown_fields": unknown_fields,
-    }
+    return {"suggestions": suggestions, "unknown_fields": unknown_fields}
 
 
 @app.post("/form/learn")
