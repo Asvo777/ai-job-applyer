@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Job Assistant</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      width: 380px;
+      min-height: 200px;
+      background: #0d1117;
+      color: #e6edf3;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 13px;
+    }
+
+    /* ── Header ── */
+    .header {
+      background: #161b22;
+      border-bottom: 1px solid #21262d;
+      padding: 14px 16px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .header-title {
+      font-size: 15px;
+      font-weight: 800;
+      color: #58a6ff;
+      letter-spacing: 0.01em;
+    }
+    .header-sub {
+      font-size: 11px;
+      color: #6e7681;
+      margin-top: 2px;
+    }
+    .status-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #3fb950;
+      box-shadow: 0 0 6px #3fb950;
+      flex-shrink: 0;
+    }
+    .status-dot.offline { background: #f85149; box-shadow: 0 0 6px #f85149; }
+    .status-dot.loading { background: #e3b341; box-shadow: 0 0 6px #e3b341; animation: pulse 1s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+    /* ── Tabs ── */
+    .tabs {
+      display: flex;
+      background: #161b22;
+      border-bottom: 1px solid #21262d;
+    }
+    .tab {
+      flex: 1;
+      padding: 9px 4px;
+      text-align: center;
+      font-size: 11px;
+      font-weight: 600;
+      color: #6e7681;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: color 0.15s, border-color 0.15s;
+      user-select: none;
+    }
+    .tab:hover { color: #c9d1d9; }
+    .tab.active { color: #58a6ff; border-bottom-color: #58a6ff; }
+
+    /* ── Tab panels ── */
+    .panel { display: none; padding: 14px 16px; flex-direction: column; gap: 12px; }
+    .panel.active { display: flex; }
+
+    /* ── Form elements ── */
+    .field { display: flex; flex-direction: column; gap: 4px; }
+    label { font-size: 11px; color: #8b949e; font-weight: 500; }
+    input[type="text"], input[type="password"], input[type="url"], textarea, select {
+      background: #161b22;
+      color: #e6edf3;
+      border: 1px solid #30363d;
+      border-radius: 7px;
+      padding: 8px 10px;
+      font-size: 12px;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.15s;
+      width: 100%;
+    }
+    input:focus, textarea:focus, select:focus { border-color: #58a6ff; }
+    textarea { resize: vertical; min-height: 80px; }
+    input[type="file"] {
+      font-size: 11px;
+      color: #8b949e;
+      padding: 6px 0;
+      cursor: pointer;
+    }
+
+    /* ── Buttons ── */
+    .btn {
+      padding: 9px 14px;
+      border: none;
+      border-radius: 7px;
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: filter 0.15s, transform 0.1s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+    .btn:active { transform: scale(0.97); }
+    .btn:hover { filter: brightness(1.15); }
+    .btn-blue   { background: #1f6feb; color: #fff; }
+    .btn-sky    { background: #0ea5e9; color: #003d5c; }
+    .btn-green  { background: #238636; color: #fff; }
+    .btn-ghost  { background: transparent; border: 1px solid #30363d; color: #8b949e; }
+    .btn-full   { width: 100%; }
+    .btn-row    { display: flex; gap: 8px; }
+    .btn-row .btn { flex: 1; }
+
+    /* ── Action grid on Actions tab ── */
+    .action-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .action-card {
+      background: #161b22;
+      border: 1px solid #21262d;
+      border-radius: 10px;
+      padding: 12px 10px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+    }
+    .action-card:hover { border-color: #58a6ff; background: #161b22ee; }
+    .action-card .icon { font-size: 22px; }
+    .action-card .card-title { font-size: 12px; font-weight: 700; color: #c9d1d9; }
+    .action-card .card-sub   { font-size: 10px; color: #6e7681; line-height: 1.4; }
+    .action-card.wide { grid-column: 1 / -1; flex-direction: row; text-align: left; gap: 12px; }
+    .action-card.wide .card-text { display: flex; flex-direction: column; gap: 2px; }
+
+    /* ── Divider ── */
+    .divider {
+      height: 1px;
+      background: #21262d;
+      margin: 2px 0;
+    }
+
+    /* ── Info box ── */
+    .info-box {
+      background: #161b22;
+      border: 1px solid #21262d;
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 11px;
+      color: #8b949e;
+      line-height: 1.6;
+    }
+    .info-box strong { color: #c9d1d9; }
+    .info-box.warn { border-color: #e3b341; color: #e3b341; }
+    .info-box.ok   { border-color: #3fb950; color: #3fb950; }
+    .info-box.err  { border-color: #f85149; color: #f85149; }
+
+    /* ── Section heading ── */
+    .section-label {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: #6e7681;
+      margin-bottom: -4px;
+    }
+
+    /* ── Toast notification ── */
+    #toast {
+      position: fixed;
+      bottom: 12px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: #21262d;
+      border: 1px solid #30363d;
+      color: #e6edf3;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 7px 14px;
+      border-radius: 20px;
+      opacity: 0;
+      transition: all 0.25s;
+      white-space: nowrap;
+      pointer-events: none;
+      z-index: 999;
+    }
+    #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    #toast.ok   { border-color: #3fb950; color: #3fb950; }
+    #toast.err  { border-color: #f85149; color: #f85149; }
+
+    /* ── Small text ── */
+    .hint { font-size: 10px; color: #6e7681; line-height: 1.5; }
+
+    /* ── Profile field rows ── */
+    .profile-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .profile-grid .wide { grid-column: 1 / -1; }
+  </style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <div>
+    <div class="header-title">🧳 Job Assistant</div>
+    <div class="header-sub" id="api-status-text">Checking backend…</div>
+  </div>
+  <div class="status-dot loading" id="api-dot"></div>
+</div>
+
+<!-- Tabs -->
+<div class="tabs">
+  <div class="tab active" data-tab="actions">🚀 Actions</div>
+  <div class="tab" data-tab="profile">👤 Profile</div>
+  <div class="tab" data-tab="resume">📄 Resume</div>
+  <div class="tab" data-tab="settings">⚙ Settings</div>
+</div>
+
+<!-- ══ ACTIONS TAB ══ -->
+<div class="panel active" id="tab-actions">
+  <div class="info-box" id="step-hint">
+    <strong>How to use:</strong><br>
+    1. On a job page → click <strong>Scan Job</strong><br>
+    2. On the form page → click <strong>Autofill</strong><br>
+    3. Click <strong>Cover Letter</strong> for an AI-written letter
+  </div>
+
+  <div class="action-grid">
+    <div class="action-card" id="btn-scan">
+      <div class="icon">🔍</div>
+      <div class="card-title">Scan Job</div>
+      <div class="card-sub">Read the job description on this page</div>
+    </div>
+
+    <div class="action-card" id="btn-fill">
+      <div class="icon">✏️</div>
+      <div class="card-title">Autofill Form</div>
+      <div class="card-sub">Fill all form fields with your profile</div>
+    </div>
+
+    <div class="action-card wide" id="btn-cover">
+      <div class="icon">🤖</div>
+      <div class="card-text">
+        <div class="card-title">Generate Cover Letter (AI)</div>
+        <div class="card-sub">Claude writes a tailored letter using your resume + job description</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="last-job-box" class="info-box" style="display:none"></div>
+</div>
+
+<!-- ══ PROFILE TAB ══ -->
+<div class="panel" id="tab-profile">
+  <div class="hint">Fill in your details once. They'll be used to autofill every application form.</div>
+
+  <div class="profile-grid">
+    <div class="field wide">
+      <label>Full Name</label>
+      <input type="text" id="p-full_name" placeholder="Jane Doe" />
+    </div>
+    <div class="field">
+      <label>Email</label>
+      <input type="text" id="p-email" placeholder="jane@email.com" />
+    </div>
+    <div class="field">
+      <label>Phone</label>
+      <input type="text" id="p-phone" placeholder="+1 555 000 0000" />
+    </div>
+    <div class="field">
+      <label>Location / City</label>
+      <input type="text" id="p-location" placeholder="Berlin, Germany" />
+    </div>
+    <div class="field">
+      <label>Current Job Title</label>
+      <input type="text" id="p-current_title" placeholder="Software Engineer" />
+    </div>
+    <div class="field">
+      <label>Current Company</label>
+      <input type="text" id="p-current_company" placeholder="Acme Corp" />
+    </div>
+    <div class="field">
+      <label>Years of Experience</label>
+      <input type="text" id="p-years_experience" placeholder="5" />
+    </div>
+    <div class="field">
+      <label>Notice Period</label>
+      <input type="text" id="p-notice_period" placeholder="1 month" />
+    </div>
+    <div class="field wide">
+      <label>LinkedIn URL</label>
+      <input type="text" id="p-linkedin" placeholder="https://linkedin.com/in/..." />
+    </div>
+    <div class="field wide">
+      <label>GitHub / Portfolio URL</label>
+      <input type="text" id="p-github" placeholder="https://github.com/..." />
+    </div>
+    <div class="field">
+      <label>Work Authorization</label>
+      <input type="text" id="p-work_authorization" placeholder="EU Citizen" />
+    </div>
+    <div class="field">
+      <label>Salary Expectation</label>
+      <input type="text" id="p-salary_expectation" placeholder="80 000 EUR" />
+    </div>
+  </div>
+
+  <button class="btn btn-blue btn-full" id="btn-save-profile">💾 Save Profile</button>
+</div>
+
+<!-- ══ RESUME TAB ══ -->
+<div class="panel" id="tab-resume">
+  <div class="hint">Upload your resume so the AI can tailor cover letters and autofill experience fields.</div>
+
+  <div id="resume-status" class="info-box" style="display:none"></div>
+
+  <div class="field">
+    <label>Upload Resume (.pdf or .txt)</label>
+    <input type="file" id="resume-file" accept=".pdf,.txt,text/plain,application/pdf" />
+  </div>
+  <button class="btn btn-sky btn-full" id="btn-upload-resume">⬆️ Upload Resume</button>
+
+  <div class="divider"></div>
+  <div class="section-label">or paste plain text</div>
+  <div class="field">
+    <label>Resume text (paste here)</label>
+    <textarea id="resume-text" placeholder="Paste your resume content here…" style="min-height:120px"></textarea>
+  </div>
+  <button class="btn btn-ghost btn-full" id="btn-save-text">💾 Save Text Resume</button>
+</div>
+
+<!-- ══ SETTINGS TAB ══ -->
+<div class="panel" id="tab-settings">
+  <div class="field">
+    <label>Backend API URL</label>
+    <input type="url" id="s-api-base" placeholder="http://127.0.0.1:8765" />
+    <div class="hint" style="margin-top:4px">Run <code style="color:#79c0ff">python main.py</code> locally, or deploy to Render (free).</div>
+  </div>
+
+  <div class="field">
+    <label>Anthropic API Key (for AI cover letters)</label>
+    <input type="password" id="s-api-key" placeholder="sk-ant-..." />
+    <div class="hint" style="margin-top:4px">
+      Get a free key at <strong>console.anthropic.com</strong>. Stored locally in your browser only — never sent anywhere except Anthropic.
+    </div>
+  </div>
+
+  <button class="btn btn-blue btn-full" id="btn-save-settings">💾 Save Settings</button>
+  <button class="btn btn-ghost btn-full" id="btn-check-backend">🔌 Test Backend Connection</button>
+
+  <div class="info-box">
+    <strong>No backend?</strong> You can run without a local server if you only need AI cover letters. But autofill and job scanning need the backend running.
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="popup.js"></script>
+</body>
+</html>

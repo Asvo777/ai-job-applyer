@@ -7,5 +7,6 @@ services:
     envVars:
       - key: RELOAD
         value: "0"
-    # Free tier — spins down after 15 min of inactivity, wakes on first request
+      - key: ANTHROPIC_API_KEY
+        sync: false   # set this manually in Render dashboard
     plan: free

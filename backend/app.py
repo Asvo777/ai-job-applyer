@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import os
 import re
 import sqlite3
 from collections import Counter
@@ -9,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import httpx
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -107,9 +109,7 @@ def init_db() -> None:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS jobs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                title TEXT,
-                company TEXT,
-                url TEXT,
+                title TEXT, company TEXT, url TEXT,
                 description TEXT NOT NULL,
                 created_at TEXT NOT NULL
             )
@@ -131,7 +131,7 @@ def upsert_profile(data: dict[str, str]) -> None:
         for key, value in data.items():
             conn.execute("""
                 INSERT INTO profile (key, value, updated_at) VALUES (?, ?, ?)
-                ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+                ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
             """, (key, value, utc_now()))
         conn.commit()
 
@@ -144,12 +144,12 @@ def get_profile() -> dict[str, str]:
 
 def store_job(payload: JobScanPayload) -> int:
     with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.execute("""
+        cur = conn.execute("""
             INSERT INTO jobs (title, company, url, description, created_at)
             VALUES (?, ?, ?, ?, ?)
         """, (payload.title, payload.company, payload.url, payload.page_text, utc_now()))
         conn.commit()
-        return int(cursor.lastrowid)
+        return int(cur.lastrowid)
 
 
 def get_latest_job() -> dict[str, Any] | None:
@@ -171,7 +171,7 @@ def remember_field(label: str, value: str) -> None:
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("""
             INSERT INTO field_memory (normalized_label, value, updated_at) VALUES (?, ?, ?)
-            ON CONFLICT(normalized_label) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+            ON CONFLICT(normalized_label) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
         """, (nlabel, value, utc_now()))
         conn.commit()
 
@@ -179,13 +179,13 @@ def remember_field(label: str, value: str) -> None:
 def get_field_memory() -> dict[str, str]:
     with sqlite3.connect(DB_PATH) as conn:
         rows = conn.execute("SELECT normalized_label, value FROM field_memory").fetchall()
-    return {label: value for label, value in rows}
+    return {l: v for l, v in rows}
 
 
 def extract_resume_text(raw_bytes: bytes, content_type: str | None) -> str:
     if content_type and "pdf" in content_type.lower():
         reader = PdfReader(io.BytesIO(raw_bytes))
-        return "\n".join(page.extract_text() or "" for page in reader.pages).strip()
+        return "\n".join(p.extract_text() or "" for p in reader.pages).strip()
     decoded = raw_bytes.decode("utf-8", errors="ignore").strip()
     if not decoded:
         raise HTTPException(status_code=400, detail="Resume could not be decoded")
@@ -219,37 +219,100 @@ def match_profile_value(
     return FieldSuggestion(key=joined, value=None)
 
 
-def generate_cover_letter_text(profile: dict[str, str], job: dict[str, Any], tone: str) -> str:
+# ── Claude API cover letter ────────────────────────────────────────────────────
+
+async def generate_cover_letter_with_claude(
+    profile: dict[str, str],
+    job: dict[str, Any],
+    tone: str,
+    api_key: str,
+) -> str:
+    """Call the Anthropic API to generate a real AI cover letter."""
+    profile_str = "\n".join(
+        f"{k}: {v}" for k, v in profile.items() if k != "resume_text" and v
+    )
+    resume_text = profile.get("resume_text", "")[:4000]  # cap at 4k chars
+    job_desc    = (job.get("description") or "")[:3000]
+    job_title   = job.get("title") or "this role"
+    company     = job.get("company") or "your company"
+
+    prompt = f"""You are a professional career coach. Write a compelling, personalized cover letter.
+
+CANDIDATE PROFILE:
+{profile_str or "(no profile saved)"}
+
+RESUME EXCERPT:
+{resume_text or "(no resume uploaded)"}
+
+JOB INFORMATION:
+Title: {job_title}
+Company: {company}
+Description:
+{job_desc or "(no description scanned)"}
+
+Write a cover letter that:
+- Opens with a strong hook specific to this company/role
+- Highlights 2-3 specific achievements matching the job requirements
+- Shows genuine enthusiasm for this company
+- Ends with a confident call to action
+- Tone: {tone}, not generic
+- Length: 3-4 paragraphs, max 350 words
+- Do NOT use placeholder brackets like [Company Name] — use the actual values
+
+Return ONLY the cover letter text, no commentary."""
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        res = await client.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={
+                "model": "claude-haiku-4-5-20251001",
+                "max_tokens": 1024,
+                "messages": [{"role": "user", "content": prompt}],
+            },
+        )
+
+    if not res.is_success:
+        body = res.json()
+        msg  = body.get("error", {}).get("message", f"Anthropic API error {res.status_code}")
+        raise HTTPException(status_code=502, detail=f"Claude API: {msg}")
+
+    data   = res.json()
+    letter = data["content"][0]["text"].strip()
+    return letter
+
+
+def generate_cover_letter_fallback(profile: dict[str, str], job: dict[str, Any], tone: str) -> str:
+    """Simple template fallback when no API key is configured."""
     full_name     = profile.get("full_name", "Candidate")
     current_title = profile.get("current_title", "professional")
     company       = job.get("company") or "your company"
     job_title     = job.get("title")   or "this role"
     resume_snippet = profile.get("resume_text", "")
-
-    highlights   = ", ".join(top_keywords(resume_snippet, limit=8))
-    jd_keywords  = ", ".join(top_keywords(job.get("description", ""), limit=10))
-
-    tone_line = {"enthusiastic": "I am genuinely excited",
-                 "concise": "I am writing"}.get(tone, "I am pleased")
+    highlights    = ", ".join(top_keywords(resume_snippet, limit=6))
+    jd_keywords   = ", ".join(top_keywords(job.get("description", ""), limit=8))
+    tone_line     = {"enthusiastic": "I am genuinely excited", "concise": "I am writing"}.get(tone, "I am pleased")
 
     return (
         f"Dear Hiring Team,\n\n"
         f"{tone_line} to apply for the {job_title} position at {company}. "
-        f"I am a {current_title} with hands-on experience in "
-        f"{highlights or 'relevant technical and business work'}.\n\n"
-        f"After reviewing your job description, I noticed strong alignment with my background, "
-        f"especially around {jd_keywords or 'cross-functional execution and impact-oriented delivery'}. "
-        f"I focus on building practical solutions, collaborating closely with stakeholders, "
-        f"and shipping measurable outcomes.\n\n"
-        f"I would value the opportunity to bring this mindset to {company}. "
-        f"Thank you for your time and consideration.\n\n"
-        f"Sincerely,\n{full_name}"
+        f"As a {current_title} with experience in {highlights or 'relevant areas'}, "
+        f"I believe I can make a strong contribution to your team.\n\n"
+        f"After reviewing the job description, I noticed alignment with my background, "
+        f"particularly around {jd_keywords or 'your key requirements'}.\n\n"
+        f"I would welcome the opportunity to discuss how I can contribute to {company}. "
+        f"Thank you for your consideration.\n\nSincerely,\n{full_name}\n\n"
+        f"--- Note: Add your Anthropic API key in Settings for an AI-written version. ---"
     )
 
 
 # ── FastAPI app ────────────────────────────────────────────────────────────────
 
-app = FastAPI(title="Job Application Assistant API", version="1.0.0")
+app = FastAPI(title="Job Application Assistant API", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -287,7 +350,7 @@ def read_profile() -> dict[str, Any]:
 
 @app.post("/resume/upload")
 def upload_resume(file: UploadFile = File(...)) -> dict[str, Any]:
-    raw = file.file.read()
+    raw  = file.file.read()
     text = extract_resume_text(raw, file.content_type)
     upsert_profile({"resume_text": text})
     return {"status": "resume_saved", "char_count": len(text)}
@@ -296,7 +359,7 @@ def upload_resume(file: UploadFile = File(...)) -> dict[str, Any]:
 @app.post("/job/scan")
 def scan_job(payload: JobScanPayload) -> dict[str, Any]:
     if len(payload.page_text.strip()) < 100:
-        raise HTTPException(status_code=400, detail="Page text is too short to scan")
+        raise HTTPException(status_code=400, detail="Page text too short to scan")
     job_id = store_job(payload)
     return {"job_id": job_id, "keywords": top_keywords(payload.page_text)}
 
@@ -310,21 +373,31 @@ def latest_job() -> dict[str, Any]:
 
 
 @app.post("/cover-letter/generate")
-def generate_cover_letter(payload: CoverLetterPayload) -> dict[str, Any]:
+async def generate_cover_letter(payload: CoverLetterPayload) -> dict[str, Any]:
     profile = get_profile()
-    if not profile.get("resume_text"):
-        raise HTTPException(status_code=400, detail="Upload your resume first")
-    job = get_latest_job()
+    job     = get_latest_job()
+
     if not job:
         raise HTTPException(status_code=400, detail="Scan a job description first")
-    return {"cover_letter": generate_cover_letter_text(profile=profile, job=job, tone=payload.tone)}
+
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+
+    if api_key:
+        letter = await generate_cover_letter_with_claude(
+            profile=profile, job=job, tone=payload.tone, api_key=api_key
+        )
+    else:
+        # Fallback without AI — tell caller AI isn't configured
+        letter = generate_cover_letter_fallback(profile=profile, job=job, tone=payload.tone)
+
+    return {"cover_letter": letter, "ai_generated": bool(api_key)}
 
 
 @app.post("/form/suggest")
 def suggest_for_form(payload: FormSuggestPayload) -> dict[str, Any]:
     profile = get_profile()
     memory  = get_field_memory()
-    suggestions: dict[str, str] = {}
+    suggestions:   dict[str, str]       = {}
     unknown_fields: list[dict[str, str]] = []
 
     for field in payload.fields:
