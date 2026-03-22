@@ -221,17 +221,17 @@ def match_profile_value(
 
 # ── Claude API cover letter ────────────────────────────────────────────────────
 
-async def generate_cover_letter_with_claude(
+async def generate_cover_letter_with_gemini(
     profile: dict[str, str],
     job: dict[str, Any],
     tone: str,
     api_key: str,
 ) -> str:
-    """Call the Anthropic API to generate a real AI cover letter."""
+    """Call the Gemini API (free tier) to generate a real AI cover letter."""
     profile_str = "\n".join(
         f"{k}: {v}" for k, v in profile.items() if k != "resume_text" and v
     )
-    resume_text = profile.get("resume_text", "")[:4000]  # cap at 4k chars
+    resume_text = profile.get("resume_text", "")[:4000]
     job_desc    = (job.get("description") or "")[:3000]
     job_title   = job.get("title") or "this role"
     company     = job.get("company") or "your company"
@@ -261,28 +261,25 @@ Write a cover letter that:
 
 Return ONLY the cover letter text, no commentary."""
 
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+
     async with httpx.AsyncClient(timeout=30) as client:
         res = await client.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
+            url,
+            headers={"Content-Type": "application/json"},
             json={
-                "model": "claude-haiku-4-5-20251001",
-                "max_tokens": 1024,
-                "messages": [{"role": "user", "content": prompt}],
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"maxOutputTokens": 1024, "temperature": 0.7},
             },
         )
 
     if not res.is_success:
         body = res.json()
-        msg  = body.get("error", {}).get("message", f"Anthropic API error {res.status_code}")
-        raise HTTPException(status_code=502, detail=f"Claude API: {msg}")
+        msg  = body.get("error", {}).get("message", f"Gemini API error {res.status_code}")
+        raise HTTPException(status_code=502, detail=f"Gemini API: {msg}")
 
     data   = res.json()
-    letter = data["content"][0]["text"].strip()
+    letter = data["candidates"][0]["content"]["parts"][0]["text"].strip()
     return letter
 
 
@@ -380,10 +377,10 @@ async def generate_cover_letter(payload: CoverLetterPayload) -> dict[str, Any]:
     if not job:
         raise HTTPException(status_code=400, detail="Scan a job description first")
 
-    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    api_key = os.getenv("GEMINI_API_KEY", "")
 
     if api_key:
-        letter = await generate_cover_letter_with_claude(
+        letter = await generate_cover_letter_with_gemini(
             profile=profile, job=job, tone=payload.tone, api_key=api_key
         )
     else:

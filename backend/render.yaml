@@ -7,6 +7,6 @@ services:
     envVars:
       - key: RELOAD
         value: "0"
-      - key: ANTHROPIC_API_KEY
+      - key: GEMINI_API_KEY
         sync: false   # set this manually in Render dashboard
     plan: free

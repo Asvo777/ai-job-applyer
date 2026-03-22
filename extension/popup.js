@@ -35,10 +35,10 @@ document.querySelectorAll(".tab").forEach(tab => {
 
 // ── API helpers ────────────────────────────────────────────────────────────────
 async function getSettings() {
-  const s = await load(["apiBase", "anthropicKey"]);
+  const s = await load(["apiBase", "geminiKey"]);
   return {
     apiBase: s.apiBase || "http://127.0.0.1:8765",
-    anthropicKey: s.anthropicKey || "",
+    geminiKey: s.geminiKey || "",
   };
 }
 
@@ -86,9 +86,9 @@ async function loadSettings() {
 }
 
 document.getElementById("btn-save-settings").addEventListener("click", async () => {
-  const apiBase     = document.getElementById("s-api-base").value.trim().replace(/\/$/, "");
-  const anthropicKey = document.getElementById("s-api-key").value.trim();
-  await save({ apiBase, anthropicKey });
+  const apiBase    = document.getElementById("s-api-base").value.trim().replace(/\/$/, "");
+  const geminiKey  = document.getElementById("s-api-key").value.trim();
+  await save({ apiBase, geminiKey });
   toast("Settings saved ✔", "ok");
   checkBackend();
 });
@@ -215,24 +215,23 @@ document.getElementById("btn-fill").addEventListener("click", async () => {
   }
 });
 
-// Cover letter — calls Claude API directly from popup
+// Cover letter — calls Gemini API (free, no credit card needed)
 document.getElementById("btn-cover").addEventListener("click", async () => {
-  const { anthropicKey, apiBase } = await getSettings();
-  if (!anthropicKey) {
-    toast("Add your Anthropic API key in ⚙ Settings first", "err");
+  const { geminiKey } = await getSettings();
+  if (!geminiKey) {
+    toast("Add your Gemini API key in ⚙ Settings first", "err");
     return;
   }
 
   toast("AI is writing your cover letter…", "");
 
   try {
-    // Get resume + profile from backend
+    // Get resume + profile from backend (with local storage fallback)
     const [profileData, jobData] = await Promise.all([
       apiGet("/profile").catch(() => null),
       apiGet("/job/latest").catch(() => null),
     ]);
 
-    // Also get stored profile from local storage as fallback
     const stored = await load(PROFILE_KEYS);
     const profile = profileData?.profile || stored;
 
@@ -261,43 +260,39 @@ ${jobInfo}
 
 Write a cover letter that:
 - Opens with a strong hook specific to this company/role
-- Highlights 2-3 specific achievements matching the job requirements  
+- Highlights 2-3 specific achievements matching the job requirements
 - Shows genuine enthusiasm for this company
 - Ends with a confident call to action
 - Tone: professional but warm, not generic
 - Length: 3-4 paragraphs, no more than 350 words
-- Do NOT include "Dear Hiring Manager" as the opener — use something more engaging
 - Do NOT use placeholder brackets like [Company Name] — use the actual values
 
 Return ONLY the cover letter text, no commentary.`;
 
-    // Call Claude API
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": anthropicKey,
-        "anthropic-version": "2023-06-01",
-        "anthropic-dangerous-direct-browser-access": "true",
-      },
-      body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 1024,
-        messages: [{ role: "user", content: prompt }],
-      }),
-    });
+    // Call Gemini API (free tier: no credit card, no expiry)
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { maxOutputTokens: 1024, temperature: 0.7 },
+        }),
+      }
+    );
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err?.error?.message || `Anthropic API error ${res.status}`);
+      throw new Error(err?.error?.message || `Gemini API error ${res.status}`);
     }
 
     const data = await res.json();
-    const letter = data.content?.[0]?.text || "";
+    const letter = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
 
-    if (!letter) throw new Error("Empty response from Claude");
+    if (!letter) throw new Error("Empty response from Gemini");
 
-    // Try to inject into page, else copy to clipboard
+    // Try to inject into page cover letter field, else copy to clipboard
     try {
       await sendToContent({ action: "insertCoverLetter", text: letter });
       toast("Cover letter inserted into form ✔", "ok");
