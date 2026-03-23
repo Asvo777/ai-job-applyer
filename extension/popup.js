@@ -3,7 +3,7 @@
 // ── Storage helpers ────────────────────────────────────────────────────────────
 const PROFILE_KEYS = [
   "full_name","email","phone","location","current_title","current_company",
-  "years_experience","notice_period","linkedin","github","work_authorization","salary_expectation"
+  "years_experience","notice_period","linkedin","github","work_authorization","salary_expectation","projects"
 ];
 
 function save(obj) {
@@ -248,26 +248,29 @@ document.getElementById("btn-cover").addEventListener("click", async () => {
       .map(([k, v]) => `${k}: ${v}`)
       .join("\n");
 
-    const prompt = `You are a professional career coach. Write a compelling, personalized cover letter.
-
-CANDIDATE PROFILE:
-${profileStr || "(no profile saved)"}
-
-RESUME STATUS: ${resumeInfo}
-
-JOB INFORMATION:
-${jobInfo}
-
-Write a cover letter that:
-- Opens with a strong hook specific to this company/role
-- Highlights 2-3 specific achievements matching the job requirements
-- Shows genuine enthusiasm for this company
-- Ends with a confident call to action
-- Tone: professional but warm, not generic
-- Length: 3-4 paragraphs, no more than 350 words
-- Do NOT use placeholder brackets like [Company Name] — use the actual values
-
-Return ONLY the cover letter text, no commentary.`;
+    const prompt = [
+      "You are a professional career coach. Write a complete cover letter with exactly 4 paragraphs:",
+      "",
+      "1. INTRO: Strong opening hook naming the specific role and company, and why you are excited.",
+      "2. SKILLS & EXPERIENCE: How your background and technical skills directly match the job requirements.",
+      "3. PROJECTS: Highlight 1-2 specific projects from the profile most relevant to this role and their impact.",
+      "4. OUTRO: Confident closing with eagerness to discuss further, signed with the candidate name.",
+      "",
+      "CANDIDATE PROFILE:",
+      profileStr || "(no profile saved)",
+      "",
+      "RESUME STATUS: " + resumeInfo,
+      "",
+      "JOB INFORMATION:",
+      jobInfo,
+      "",
+      "Rules:",
+      "- Use the actual company name and job title everywhere, no placeholders like [Company]",
+      "- Be specific: reference real skills, real projects, real technologies from the profile",
+      "- Tone: professional but warm",
+      "- Total length: 350-450 words",
+      "- Return ONLY the cover letter text, no section headers, no commentary",
+    ].join("\n");
 
     // Call Gemini API (free tier: no credit card, no expiry)
     const res = await fetch(
@@ -277,7 +280,7 @@ Return ONLY the cover letter text, no commentary.`;
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { maxOutputTokens: 1024, temperature: 0.7 },
+          generationConfig: { maxOutputTokens: 4096, temperature: 0.7 },
         }),
       }
     );

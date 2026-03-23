@@ -25,6 +25,8 @@ STOPWORDS = {
 }
 
 PROFILE_SYNONYMS = {
+    "first_name":         ["first name", "given name", "forename"],
+    "last_name":          ["last name", "family name", "surname"],
     "full_name":          ["name", "full name", "legal name", "candidate name"],
     "email":              ["email", "e-mail", "email address"],
     "phone":              ["phone", "mobile", "telephone", "contact number"],
@@ -207,10 +209,28 @@ def match_profile_value(
         return FieldSuggestion(key=joined, value=memory[joined])
 
     for known_key, aliases in PROFILE_SYNONYMS.items():
-        if known_key not in profile:
+        value = profile.get(known_key)
+
+        # Derived compatibility for name fields.
+        if not value and known_key == "full_name":
+            first = (profile.get("first_name") or "").strip()
+            last = (profile.get("last_name") or "").strip()
+            if first or last:
+                value = f"{first} {last}".strip()
+        elif not value and known_key == "first_name":
+            full_name = (profile.get("full_name") or "").strip()
+            if full_name:
+                value = full_name.split()[0]
+        elif not value and known_key == "last_name":
+            full_name = (profile.get("full_name") or "").strip()
+            if full_name:
+                parts = full_name.split()
+                value = " ".join(parts[1:]) if len(parts) > 1 else ""
+
+        if not value:
             continue
         if any(alias in joined for alias in aliases):
-            return FieldSuggestion(key=known_key, value=profile[known_key])
+            return FieldSuggestion(key=known_key, value=value)
 
     for known_key, known_value in profile.items():
         if normalize(known_key) in joined:
@@ -285,7 +305,9 @@ Return ONLY the cover letter text, no commentary."""
 
 def generate_cover_letter_fallback(profile: dict[str, str], job: dict[str, Any], tone: str) -> str:
     """Simple template fallback when no API key is configured."""
-    full_name     = profile.get("full_name", "Candidate")
+    first_name    = (profile.get("first_name") or "").strip()
+    last_name     = (profile.get("last_name") or "").strip()
+    full_name     = f"{first_name} {last_name}".strip() or profile.get("full_name", "Candidate")
     current_title = profile.get("current_title", "professional")
     company       = job.get("company") or "your company"
     job_title     = job.get("title")   or "this role"

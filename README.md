@@ -61,7 +61,8 @@ python main.py
 
 ```json
 {
-  "full_name": "Jane Doe",
+  "first_name": "Jane",
+  "last_name": "Doe",
   "email": "jane@example.com",
   "phone": "+1 555 000 0000",
   "location": "Berlin, Germany",

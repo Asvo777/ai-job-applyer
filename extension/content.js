@@ -10,24 +10,30 @@
     unknownFields: [],
   };
 
-  // ── API base from storage ──────────────────────────────────────────────────
-  function getApiBase() {
-    return new Promise(resolve => {
-      chrome.storage.local.get(["apiBase"], r => {
-        resolve((r.apiBase || "http://127.0.0.1:8765").replace(/\/$/, ""));
-      });
-    });
-  }
-
   async function apiPost(path, body) {
-    const base = await getApiBase();
-    const res = await fetch(base + path, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+    const response = await new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage(
+        {
+          target: "backend",
+          method: "POST",
+          path,
+          body,
+        },
+        (result) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+          } else {
+            resolve(result || {});
+          }
+        }
+      );
     });
-    if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
-    return res.json();
+
+    if (!response.ok) {
+      throw new Error(response.error || "Failed to fetch backend");
+    }
+
+    return response.data;
   }
 
   // ── Form utilities ─────────────────────────────────────────────────────────
